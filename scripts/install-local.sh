@@ -11,11 +11,16 @@ source_dir="$task_dir/source"
 build_dir="$task_dir/build"
 previous_app="$task_dir/previous-Awayke.app"
 failed_app="$task_dir/failed-Awayke.app"
+installed_team=""
 
 cleanup() {
     /bin/rm -rf "$task_dir"
 }
 trap cleanup EXIT
+
+if [[ -e "$install_app" ]]; then
+    installed_team="$(codesign -dv --verbose=4 "$install_app" 2>&1 | /usr/bin/awk -F= '/^TeamIdentifier=/{print $2}')"
+fi
 
 mkdir -p "$source_dir"
 /usr/bin/rsync -a \
@@ -84,6 +89,10 @@ if ! codesign --verify --deep --strict "$install_app"; then
     mv "$install_app" "$failed_app"
     [[ ! -e "$previous_app" ]] || mv "$previous_app" "$install_app"
     exit 1
+fi
+
+if [[ -n "$installed_team" && "$installed_team" != "$team_id" ]]; then
+    "$install_app/Contents/MacOS/Awayke" --unregister-helper
 fi
 
 open -a "$install_app"

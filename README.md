@@ -68,7 +68,7 @@ Run the signed local build and installer:
 ./scripts/install-local.sh
 ```
 
-The script builds an arm64 Release application with the local Developer ID, verifies the application and helper signatures, replaces `/Applications/Awayke.app`, and starts the new build. It defaults to team `MU78QS2CA9`. Set `AWAYKE_TEAM_ID` and `AWAYKE_SIGNING_IDENTITY` to use another signing identity.
+The script builds an arm64 Release application with the local Developer ID, verifies the application and helper signatures, replaces `/Applications/Awayke.app`, and starts the new build. It also resets an existing helper registration when the installed application uses a different signing team. macOS then requests approval for the local helper once. Normal updates from the same signing team keep the existing approval. The script defaults to team `MU78QS2CA9`. Set `AWAYKE_TEAM_ID` and `AWAYKE_SIGNING_IDENTITY` to use another signing identity.
 
 For later updates, pull this fork and run the same script again.
 

@@ -38,6 +38,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// flight. Remember that event so it is not lost.
     private var pendingSessionEnd: SessionEndReason?
 
+    private var isHelperUnregisterRequest: Bool {
+        CommandLine.arguments.contains("--unregister-helper")
+    }
+
     private enum SessionEndReason {
         case timer
         case lidReopened
@@ -61,6 +65,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
+
+        if isHelperUnregisterRequest {
+            helper.unregister()
+            NSApp.terminate(nil)
+            return
+        }
+
         helper.register()
 
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
