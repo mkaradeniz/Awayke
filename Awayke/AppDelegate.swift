@@ -64,6 +64,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         helper.register()
 
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        item.autosaveName = "Awayke"
         // Tightens the horizontal slot around the icon.
         item.length = 14
         statusItem = item
