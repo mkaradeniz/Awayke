@@ -70,6 +70,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem = item
 
         if let button = item.button {
+            button.setAccessibilityIdentifier("Awayke")
             button.target = self
             button.action = #selector(handleClick(_:))
             button.sendAction(on: [.leftMouseUp, .rightMouseUp])
