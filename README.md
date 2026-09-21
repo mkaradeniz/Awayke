@@ -58,6 +58,20 @@ open Awayke.xcodeproj
 
 Requires Xcode 16+ and macOS 13 Ventura or later.
 
+### Install this fork locally
+
+This fork assigns a persistent name to the menu-bar item so macOS and menu-bar managers can preserve its position.
+
+Run the signed local build and installer:
+
+```bash
+./scripts/install-local.sh
+```
+
+The script builds an arm64 Release application with the local Developer ID, verifies the application and helper signatures, replaces `/Applications/Awayke.app`, and starts the new build. It defaults to team `MU78QS2CA9`. Set `AWAYKE_TEAM_ID` and `AWAYKE_SIGNING_IDENTITY` to use another signing identity.
+
+For later updates, pull this fork and run the same script again.
+
 > **Why isn't this on the App Store?**
 > App Store sandboxing blocks the system call Awayke depends on. Lunar, TextExpander, and BetterTouchTool ship outside the App Store for the same reason.
 
