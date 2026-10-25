@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 
 var failures = 0
 
@@ -98,6 +99,86 @@ unknownStart.start(lidClosed: nil)
 checkBool(unknownStart.isWaitingForClose, true, "unknown-start session waits for close")
 checkBool(unknownStart.handle(lidClosed: true), false, "unknown-start close arms session end")
 checkBool(unknownStart.handle(lidClosed: false), true, "unknown-start reopen expires session")
+
+// Socket tests use a private directory and never invoke the privileged helper.
+let testDirectory = URL(fileURLWithPath: CommandLine.arguments[1])
+    .appendingPathComponent("s-\(UUID().uuidString.prefix(8))")
+let socketPath = testDirectory.appendingPathComponent("control.sock").path
+var active = false
+var server: CommandServer? = try CommandServer(path: socketPath) { command, reply in
+    if command == .on { active = true }
+    if command == .off { active = false }
+    reply(ControlReply(ok: true, status: ControlStatus(
+        active: active, intent: active, suspendedForBattery: false, batteryOverride: false,
+        batteryThreshold: 20, session: active ? "indefinite" : "none",
+        remainingSeconds: nil, helper: "enabled", busy: false
+    )))
+}
+do {
+    _ = try CommandServer(path: socketPath) { _, reply in reply(ControlReply(ok: true)) }
+    checkBool(false, true, "second server cannot replace a live control socket")
+} catch {
+    checkBool(true, true, "second server cannot replace a live control socket")
+}
+let socketPermissions = try FileManager.default.attributesOfItem(atPath: socketPath)[.posixPermissions] as! NSNumber
+checkBool(socketPermissions.intValue == 0o600, true, "control socket is private")
+let directoryPermissions = try FileManager.default.attributesOfItem(atPath: testDirectory.path)[.posixPermissions] as! NSNumber
+checkBool(directoryPermissions.intValue == 0o700, true, "control directory is private")
+
+let completed = DispatchGroup()
+completed.enter()
+DispatchQueue.global().async {
+    var results: [(Bool, String)] = []
+    do {
+        for (command, expected) in [(ControlCommand.status, false), (.on, true), (.on, true),
+                                    (.status, true), (.off, false), (.off, false)] {
+            let reply = try ControlSocket.request(command, path: socketPath)
+            results.append((reply.ok && reply.status?.active == expected, "socket \(command) returns applied state"))
+        }
+        let descriptor = socket(AF_UNIX, SOCK_STREAM, 0)
+        defer { close(descriptor) }
+        ControlSocket.configure(descriptor)
+        var address = try ControlSocket.address(socketPath)
+        let connected = withUnsafePointer(to: &address) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                connect(descriptor, $0, socklen_t(MemoryLayout<sockaddr_un>.size))
+            }
+        }
+        if connected == 0 {
+            try ControlSocket.write(Data("toggle\n".utf8), to: descriptor)
+            let reply = try JSONDecoder().decode(ControlReply.self, from: ControlSocket.readLine(from: descriptor))
+            results.append((!reply.ok, "unknown socket command is rejected"))
+        } else {
+            results.append((false, "invalid-command test connects"))
+        }
+        do {
+            _ = try ControlSocket.request(.on, path: socketPath + ".missing")
+            results.append((false, "unavailable app returns an error"))
+        } catch {
+            results.append((true, "unavailable app returns an error"))
+        }
+    } catch {
+        results.append((false, "socket round trip: \(error.localizedDescription)"))
+    }
+    let finalResults = results
+    DispatchQueue.main.async {
+        for (passed, name) in finalResults { checkBool(passed, true, name) }
+        completed.leave()
+    }
+}
+let deadline = Date().addingTimeInterval(15)
+while completed.wait(timeout: .now()) != .success && Date() < deadline {
+    RunLoop.current.run(until: Date().addingTimeInterval(0.01))
+}
+checkBool(completed.wait(timeout: .now()) == .success, true, "socket tests complete within timeout")
+server = nil
+// Cancellation closes the listener before releasing the lifetime lock.
+let stopDeadline = Date().addingTimeInterval(2)
+while FileManager.default.fileExists(atPath: socketPath) && Date() < stopDeadline {
+    RunLoop.current.run(until: Date().addingTimeInterval(0.01))
+}
+checkBool(FileManager.default.fileExists(atPath: socketPath), false, "server removes its socket on shutdown")
+try FileManager.default.removeItem(at: testDirectory)
 
 if failures > 0 {
     print("\(failures) failing")

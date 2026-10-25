@@ -56,7 +56,7 @@ cd Awayke
 open Awayke.xcodeproj
 ```
 
-Requires Xcode 16+ and macOS 13 Ventura or later.
+Requires Xcode 26+ and macOS 13 Ventura or later.
 
 ### Install this fork locally
 
@@ -71,6 +71,37 @@ Run the signed local build and installer:
 The script builds an arm64 Release application with the local Developer ID, verifies the application and helper signatures, replaces `/Applications/Awayke.app`, and starts the new build. It also resets an existing helper registration when the installed application uses a different signing team. macOS then requests approval for the local helper once. Normal updates from the same signing team keep the existing approval. The script defaults to team `MU78QS2CA9`. Set `AWAYKE_TEAM_ID` and `AWAYKE_SIGNING_IDENTITY` to use another signing identity.
 
 For later updates, pull this fork and run the same script again.
+
+### Command-line control
+
+With the installed app running, use:
+
+```bash
+./scripts/awayke status
+./scripts/awayke on
+./scripts/awayke off
+```
+
+The equivalent direct command is `/Applications/Awayke.app/Contents/MacOS/Awayke --cli on`.
+The owner's dotfiles also provide `awayke` on `PATH`.
+
+Commands send requests to the running app over a private, user-local Unix socket. They use the same state changes as the menu bar toggle, including the display assertion and battery rules. Repeated `on` preserves an existing timer or lid session. `off` also cancels a session paused for low battery. A new `on` starts an indefinite session and has the same low-battery override as a manual click.
+
+Every successful command prints JSON with `ok` and `status`. Status includes `active`, `intent`, `suspendedForBattery`, `batteryOverride`, `batteryThreshold`, `session`, optional `remainingSeconds`, `helper`, and `busy`. `active` describes the app's applied state. It does not independently verify changes made by another program. Exit codes are 0 for success, 1 for an unavailable app, busy state, or failed operation, and 2 for invalid arguments. A successful status request can report `active: false`.
+
+CLI changes require the approved background helper. They do not open administrator dialogs or fall back to direct `pmset`. If the app is stopped, start it with `open -a Awayke` and retry. A timeout does not cancel an in-flight operation; check status before retrying. Avoid external sleep-setting changes because they bypass the app's state.
+
+### Focused tests
+
+Compile and run the battery, lid-session, and local command transport tests with an existing temporary output directory:
+
+```bash
+swiftc -default-isolation MainActor Awayke/AutoOffPolicy.swift Awayke/LidSessionTracker.swift \
+  Awayke/CommandControl.swift Tests/main.swift -o "$AWAYKE_TEST_DIR/tests"
+"$AWAYKE_TEST_DIR/tests" "$AWAYKE_TEST_DIR"
+```
+
+The tests do not change system power settings.
 
 > **Why isn't this on the App Store?**
 > App Store sandboxing blocks the system call Awayke depends on. Lunar, TextExpander, and BetterTouchTool ship outside the App Store for the same reason.

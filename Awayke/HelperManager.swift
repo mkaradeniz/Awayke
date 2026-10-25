@@ -80,8 +80,16 @@ final class HelperManager {
     }
 
     func setSleepDisabled(_ disable: Bool) async throws {
-        let proxy = try ensureProxy()
+        guard isUsable else { throw HelperError.helperUnavailable }
+        let conn = connection ?? makeConnection()
+        connection = conn
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            guard let proxy = conn.remoteObjectProxyWithErrorHandler({ error in
+                continuation.resume(throwing: HelperError.connectionFailed(error.localizedDescription))
+            }) as? AwaykeHelperProtocol else {
+                continuation.resume(throwing: HelperError.connectionFailed("Invalid helper proxy."))
+                return
+            }
             proxy.setSleepDisabled(disable) { remoteError in
                 if let remoteError {
                     continuation.resume(throwing: HelperError.remoteError(remoteError))
@@ -90,28 +98,6 @@ final class HelperManager {
                 }
             }
         }
-    }
-
-    private func ensureProxy() throws -> AwaykeHelperProtocol {
-        guard isUsable else { throw HelperError.helperUnavailable }
-
-        let conn = connection ?? makeConnection()
-        connection = conn
-
-        var proxyError: Error?
-        let proxy = conn.remoteObjectProxyWithErrorHandler { error in
-            proxyError = error
-        } as? AwaykeHelperProtocol
-
-        if let proxyError {
-            connection?.invalidate()
-            connection = nil
-            throw HelperError.connectionFailed(proxyError.localizedDescription)
-        }
-        guard let proxy else {
-            throw HelperError.connectionFailed("Couldn't cast remote proxy to AwaykeHelperProtocol")
-        }
-        return proxy
     }
 
     private func makeConnection() -> NSXPCConnection {

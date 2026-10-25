@@ -1,0 +1,4 @@
+#!/bin/sh
+set -eu
+
+exec /Applications/Awayke.app/Contents/MacOS/Awayke --cli "$@"

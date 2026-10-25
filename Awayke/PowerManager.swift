@@ -31,18 +31,25 @@ final class PowerManager {
         self.helper = helper
     }
 
-    func disableSleep(_ disable: Bool, completion: @escaping (Result<Void, Error>) -> Void) {
+    func disableSleep(_ disable: Bool, allowFallback: Bool = true,
+                      completion: @escaping (Result<Void, Error>) -> Void) {
         if helper.isUsable {
             Task {
                 do {
                     try await helper.setSleepDisabled(disable)
                     completion(.success(()))
                 } catch {
-                    self.disableSleepViaOsascript(disable, completion: completion)
+                    if allowFallback {
+                        self.disableSleepViaOsascript(disable, completion: completion)
+                    } else {
+                        completion(.failure(error))
+                    }
                 }
             }
-        } else {
+        } else if allowFallback {
             disableSleepViaOsascript(disable, completion: completion)
+        } else {
+            completion(.failure(HelperError.helperUnavailable))
         }
     }
 

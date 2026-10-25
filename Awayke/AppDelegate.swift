@@ -16,6 +16,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let autoOffTimer = AutoOffTimer()
     private let lidMonitor = LidMonitor()
     private let lidSession = LidSessionTracker()
+    private var commandServer: CommandServer?
+    private var terminating = false
 
     private let thresholdDefaultsKey = "autoOffThreshold"
     private let thresholdOptions = [0, 10, 20, 30]
@@ -72,6 +74,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
+        do {
+            commandServer = try CommandServer { [weak self] command, reply in
+                guard let self else {
+                    reply(ControlReply(ok: false, error: "Awayke is shutting down."))
+                    return
+                }
+                self.handleCommand(command, reply: reply)
+            }
+        } catch {
+            NSLog("Awayke: %@", error.localizedDescription)
+            NSApp.terminate(nil)
+            return
+        }
+
         helper.register()
 
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -95,7 +111,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Silently reset it via the helper. Skipped if the helper isn't
         // approved (no password prompt for cleanup the user didn't ask for).
         if helper.isUsable {
-            powerManager.disableSleep(false) { _ in }
+            powerChangeInFlight = true
+            powerManager.disableSleep(false, allowFallback: false) { [weak self] _ in
+                DispatchQueue.main.async { self?.powerChangeInFlight = false }
+            }
         }
 
         if threshold > 0 {
@@ -121,6 +140,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        // Do not exit while an outstanding command could still disable sleep.
+        guard !powerChangeInFlight else { return .terminateCancel }
+        terminating = true
         // Never leave the system with sleep disabled. Defer termination
         // until the helper (or osascript fallback) finishes flipping
         // pmset back off, so the main run loop stays alive for any auth
@@ -156,11 +178,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// With neither session option, turning on is indefinite.
     private func setIntent(_ on: Bool,
                            timerMinutes: Int? = nil,
-                           untilLidReopens: Bool = false) {
-        guard !powerChangeInFlight else { return }
+                           untilLidReopens: Bool = false,
+                           completion: ((Result<Void, Error>) -> Void)? = nil) {
+        guard !powerChangeInFlight else {
+            completion?(.failure(ControlSocket.failure("Awayke is busy. Check status before retrying.")))
+            return
+        }
         powerChangeInFlight = true
 
-        powerManager.disableSleep(on) { [weak self] result in
+        powerManager.disableSleep(on, allowFallback: completion == nil) { [weak self] result in
             DispatchQueue.main.async {
                 guard let self else { return }
                 self.powerChangeInFlight = false
@@ -185,9 +211,52 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     self.syncDisplayKeeper()
                     self.refreshStatusItem()
                 case .failure(let error):
-                    self.presentError(error)
+                    if completion == nil { self.presentError(error) }
                 }
                 self.processPendingSessionEnd()
+                completion?(result)
+            }
+        }
+    }
+
+    private func controlStatus() -> ControlStatus {
+        let session = lidSession.isActive
+            ? (lidSession.isWaitingForClose ? "untilLidClosesAndReopens" : "untilLidReopens")
+            : (autoOffTimer.isRunning ? "timer" : (intent ? "indefinite" : "none"))
+        return ControlStatus(
+            active: effectiveActive, intent: intent, suspendedForBattery: suspendedForBattery,
+            batteryOverride: overrideBattery, batteryThreshold: threshold, session: session,
+            remainingSeconds: autoOffTimer.remaining.map { Int($0.rounded(.up)) },
+            helper: String(describing: helper.state), busy: powerChangeInFlight
+        )
+    }
+
+    private func handleCommand(_ command: ControlCommand, reply: @escaping (ControlReply) -> Void) {
+        guard !terminating else {
+            reply(ControlReply(ok: false, error: "Awayke is shutting down."))
+            return
+        }
+        if command == .status {
+            reply(ControlReply(ok: true, status: controlStatus()))
+            return
+        }
+        guard !powerChangeInFlight else {
+            reply(ControlReply(ok: false, status: controlStatus(), error: "Awayke is busy. Check status before retrying."))
+            return
+        }
+        let on = command == .on
+        // Repeated on preserves a bounded session. Off must also clear a paused intent.
+        if on == effectiveActive && (on || !intent) {
+            reply(ControlReply(ok: true, status: controlStatus()))
+            return
+        }
+        setIntent(on) { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case .success:
+                reply(ControlReply(ok: true, status: self.controlStatus()))
+            case .failure(let error):
+                reply(ControlReply(ok: false, status: self.controlStatus(), error: error.localizedDescription))
             }
         }
     }

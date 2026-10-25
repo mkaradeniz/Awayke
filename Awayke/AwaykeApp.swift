@@ -3,15 +3,18 @@
 //  Awayke
 //
 
-import SwiftUI
+import AppKit
 
 @main
-struct AwaykeApp: App {
-    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
-
-    var body: some Scene {
-        Settings {
-            EmptyView()
+struct AwaykeApp {
+    static func main() {
+        if CommandLine.arguments.dropFirst().first == "--cli" {
+            exit(ControlCLI.run(arguments: Array(CommandLine.arguments.dropFirst(2))))
         }
+
+        let application = NSApplication.shared
+        let delegate = AppDelegate()
+        application.delegate = delegate
+        withExtendedLifetime(delegate) { application.run() }
     }
 }
